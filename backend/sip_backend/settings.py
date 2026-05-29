@@ -37,7 +37,7 @@ if not DEBUG and SECRET_KEY.startswith("django-insecure-dev-only"):
 
 ALLOWED_HOSTS = _env_list(
     "ALLOWED_HOSTS",
-    ["127.0.0.1", "localhost", "testserver"],
+    ["127.0.0.1", "localhost", "testserver", ".onrender.com"],
 )
 
 

@@ -16,9 +16,24 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SIP Behaviour Analytics Platform",
   description:
-    "A PhD research platform for predictive analysis of SIP investment, market volatility, and investor behaviour."
-};
+    "A PhD research platform for predictive analysis of SIP investment, market volatility, and investor behaviour.",
 
+  openGraph: {
+    title: "SIP Behaviour Analytics Platform",
+    description:
+      "Participate in our PhD research survey on SIP investment behaviour and market volatility.",
+    url: "https://sip-behaviour-analytics.vercel.app",
+    siteName: "SIP Behaviour Analytics",
+    type: "website",
+  },
+
+  twitter: {
+    card: "summary_large_image",
+    title: "SIP Behaviour Analytics Platform",
+    description:
+      "Participate in our PhD research survey on SIP investment behaviour and market volatility.",
+  },
+};
 export default function RootLayout({
   children
 }: Readonly<{

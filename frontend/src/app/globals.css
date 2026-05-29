@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 222 100% 99%;
+  --foreground: 230 58% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 230 58% 16%;
+  --primary: 233 100% 62%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 232 100% 96%;
+  --secondary-foreground: 230 58% 16%;
+  --muted: 225 100% 97%;
+  --muted-foreground: 229 24% 42%;
+  --accent: 190 100% 90%;
+  --accent-foreground: 230 58% 16%;
+  --border: 228 100% 91%;
+  --input: 228 100% 91%;
+  --ring: 233 100% 74%;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f8fbff;
+  color: #17215a;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  letter-spacing: 0;
+}
+
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 22px 70px rgba(84, 113, 255, 0.13);
+  backdrop-filter: blur(18px);
+}
+
+.finance-grid {
+  background-image:
+    linear-gradient(rgba(104, 127, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(104, 127, 255, 0.12) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(circle at center, black 0%, transparent 74%);
+}
+
+.animated-gradient {
+  background: linear-gradient(115deg, #eef5ff, #ffffff, #f4efff, #eafcff);
+  background-size: 240% 240%;
+  animation: gradientShift 12s ease infinite;
+}
+
+.floating-line {
+  animation: floatLine 8s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes floatLine {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}

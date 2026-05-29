@@ -162,10 +162,17 @@ if importlib.util.find_spec("whitenoise"):
 
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
-    ["http://127.0.0.1:3000", "http://localhost:3000"],
+    [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "https://sip-behaviour-analytics.vercel.app",
+    ],
 )
 CORS_ALLOW_ALL_ORIGINS = _env_bool("CORS_ALLOW_ALL_ORIGINS", default=False)
-CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS", [])
+CSRF_TRUSTED_ORIGINS = _env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    ["https://sip-behaviour-analytics.vercel.app"],
+)
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [

@@ -25,6 +25,15 @@ export const metadata: Metadata = {
     url: "https://sip-behaviour-analytics.vercel.app",
     siteName: "SIP Behaviour Analytics",
     type: "website",
+    images: [
+  {
+    url: "/og-image.png",
+    width: 1200,
+    height: 630,
+    alt: "SIP Behaviour Analytics Platform",
+  },
+],
+},
   },
 
   twitter: {

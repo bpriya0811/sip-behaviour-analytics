@@ -26,14 +26,13 @@ export const metadata: Metadata = {
     siteName: "SIP Behaviour Analytics",
     type: "website",
     images: [
-  {
-    url: "/og-image.png",
-    width: 1200,
-    height: 630,
-    alt: "SIP Behaviour Analytics Platform",
-  },
-],
-},
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "SIP Behaviour Analytics Platform",
+      },
+    ],
   },
 
   twitter: {
@@ -41,16 +40,20 @@ export const metadata: Metadata = {
     title: "SIP Behaviour Analytics Platform",
     description:
       "Participate in our PhD research survey on SIP investment behaviour and market volatility.",
+    images: ["/og-image.png"],
   },
 };
+
 export default function RootLayout({
-  children
+  children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
         {children}
       </body>
     </html>

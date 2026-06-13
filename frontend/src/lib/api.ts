@@ -1,4 +1,10 @@
-import type { AnalyticsSummary, BehaviourResult, Question, SurveyAnswers } from "@/lib/types";
+import type {
+  AnalyticsSummary,
+  BehaviourResult,
+  GeographyOptions,
+  Question,
+  SurveyAnswers
+} from "@/lib/types";
 
 function resolveApiBase() {
   const configured = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api";
@@ -8,8 +14,12 @@ function resolveApiBase() {
 
 export const API_BASE = resolveApiBase();
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit & { cache?: "no-store" | "force-cache" }
+): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    cache: init?.cache ?? "default",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {})
@@ -26,7 +36,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function fetchQuestions() {
-  return request<Question[]>("/questions/");
+  return request<Question[]>("/questions/", { cache: "force-cache" });
+}
+
+export function fetchGeographyOptions() {
+  return request<GeographyOptions>("/geography/options/", { cache: "force-cache" });
 }
 
 export function fetchAdminQuestions() {
@@ -54,7 +68,8 @@ export function deleteQuestion(id: number) {
 export function submitSurvey(answers: SurveyAnswers) {
   return request<{ result: BehaviourResult }>("/responses/", {
     method: "POST",
-    body: JSON.stringify({ answers })
+    body: JSON.stringify({ answers }),
+    cache: "no-store"
   });
 }
 
@@ -63,7 +78,9 @@ export function fetchAnalytics(filters?: { district?: string; taluka?: string })
   if (filters?.district) params.set("district", filters.district);
   if (filters?.taluka) params.set("taluka", filters.taluka);
   const query = params.toString();
-  return request<AnalyticsSummary>(`/analytics/summary/${query ? `?${query}` : ""}`);
+  return request<AnalyticsSummary>(`/analytics/summary/${query ? `?${query}` : ""}`, {
+    cache: "no-store"
+  });
 }
 
 export function exportUrl(

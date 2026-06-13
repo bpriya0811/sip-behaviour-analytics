@@ -87,6 +87,22 @@ QUESTIONS = [
         ],
     },
     {
+        "step": 1,
+        "section": "Demographic Information",
+        "slug": "village",
+        "prompt": "Village",
+        "question_type": "text",
+        "placeholder": "Search and select village",
+        "order": 8,
+        "metadata": {
+            "dependsOn": "taluka",
+            "dependsOnDistrict": "district",
+            "autocomplete": True,
+            "source": "geographic_locations",
+            "dependentPlaceholder": "Select taluka first",
+        },
+    },
+    {
         "step": 2,
         "section": "SIP Investment Behaviour",
         "slug": "monthly_sip_amount",

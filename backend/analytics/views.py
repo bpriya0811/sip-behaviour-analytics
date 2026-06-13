@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import logging
 from collections import Counter, defaultdict
 from io import BytesIO, StringIO
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Avg, Count
 from django.http import FileResponse, HttpResponse
+from django.views.decorators.cache import cache_page
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -23,10 +26,20 @@ from .geography import (
     TALUKAS_BY_DISTRICT,
     canonical_district,
     canonical_taluka,
+    taluka_options_metadata,
 )
-from .models import BehaviourScore, Question, Respondent, Response, StockPreference
+from .models import (
+    BehaviourScore,
+    GeographicLocation,
+    Question,
+    Respondent,
+    Response,
+    StockPreference,
+)
 from .scoring import calculate_behaviour
 from .serializers import QuestionSerializer, RespondentSerializer
+
+logger = logging.getLogger(__name__)
 
 
 def _coerce_number(value: Any):
@@ -52,6 +65,7 @@ def _extract_profile(answers: dict[str, Any]) -> dict[str, Any]:
     age = _coerce_number(answers.get("age"))
     district = canonical_district(answers.get("district") or answers.get("district_city"))
     taluka = canonical_taluka(answers.get("taluka"), district)
+    village = _answer_text(answers.get("village")).strip()
     return {
         "age": int(age) if age is not None else None,
         "gender": _answer_text(answers.get("gender")),
@@ -60,21 +74,42 @@ def _extract_profile(answers: dict[str, Any]) -> dict[str, Any]:
         "education": _answer_text(answers.get("education")),
         "district": district,
         "taluka": taluka,
+        "village": village,
         "district_city": district or _answer_text(answers.get("district_city")),
     }
 
 
-def _validate_geography(answers: dict[str, Any]) -> tuple[str, str, dict[str, str]]:
+def _canonical_village(value: Any, district: str, taluka: str) -> str:
+    village = _answer_text(value).strip()
+    if not village:
+        return ""
+
+    locations = GeographicLocation.objects.filter(district=district, taluka=taluka)
+    if not locations.exists():
+        return village
+
+    normalized = "".join(char for char in village.lower() if char.isalnum())
+    for location in locations.only("village"):
+        location_key = "".join(char for char in location.village.lower() if char.isalnum())
+        if normalized == location_key:
+            return location.village
+    return ""
+
+
+def _validate_geography(answers: dict[str, Any]) -> tuple[str, str, str, dict[str, str]]:
     district = canonical_district(answers.get("district") or answers.get("district_city"))
     taluka = canonical_taluka(answers.get("taluka"), district)
+    village = _canonical_village(answers.get("village"), district, taluka)
     errors: dict[str, str] = {}
 
     if not district:
         errors["district"] = "Select Kolhapur or Sangli district."
     if district and not taluka:
         errors["taluka"] = f"Select a valid taluka for {district} district."
+    if district and taluka and not village:
+        errors["village"] = f"Select a valid village for {taluka} taluka."
 
-    return district, taluka, errors
+    return district, taluka, village, errors
 
 
 def _requested_filters(request) -> tuple[str, str, dict[str, str]]:
@@ -108,10 +143,52 @@ class QuestionViewSet(viewsets.ModelViewSet):
     serializer_class = QuestionSerializer
 
 
+@cache_page(60 * 5)  # Cache for 5 minutes
 @api_view(["GET"])
 def public_questions(request):
     questions = Question.objects.prefetch_related("options").filter(active=True)
     return ApiResponse(QuestionSerializer(questions, many=True).data)
+
+
+@cache_page(60 * 5)  # Cache for 5 minutes
+@api_view(["GET"])
+def geography_options(request):
+    locations = list(
+        GeographicLocation.objects.order_by("district", "taluka", "village").values(
+            "district", "taluka", "village"
+        )
+    )
+    districts: list[str] = []
+    talukas_by_district: dict[str, list[str]] = {}
+    villages_by_district_taluka: dict[str, dict[str, list[str]]] = {}
+
+    if locations:
+        for item in locations:
+            district = item["district"]
+            taluka = item["taluka"]
+            village = item["village"]
+            if district not in districts:
+                districts.append(district)
+            talukas_by_district.setdefault(district, [])
+            if taluka not in talukas_by_district[district]:
+                talukas_by_district[district].append(taluka)
+            villages_by_district_taluka.setdefault(district, {}).setdefault(taluka, [])
+            villages_by_district_taluka[district][taluka].append(village)
+    else:
+        districts = list(DISTRICTS)
+        talukas_by_district = taluka_options_metadata()
+        villages_by_district_taluka = {
+            district: {taluka: [] for taluka in talukas}
+            for district, talukas in talukas_by_district.items()
+        }
+
+    return ApiResponse(
+        {
+            "districts": districts,
+            "talukasByDistrict": talukas_by_district,
+            "villagesByDistrictTaluka": villages_by_district_taluka,
+        }
+    )
 
 
 @api_view(["POST"])
@@ -123,47 +200,71 @@ def submit_survey(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     answers = dict(answers)
-    district, taluka, geography_errors = _validate_geography(answers)
+    district, taluka, village, geography_errors = _validate_geography(answers)
     if geography_errors:
         return ApiResponse(
-            {"detail": "District and taluka are required.", "errors": geography_errors},
+            {
+                "detail": "District, taluka, and village are required.",
+                "errors": geography_errors,
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
     answers["district"] = district
     answers["taluka"] = taluka
+    answers["village"] = village
 
-    profile = _extract_profile(answers)
-    respondent = Respondent.objects.create(**profile)
-    questions = {
-        question.slug: question
-        for question in Question.objects.prefetch_related("options").all()
-    }
+    try:
+        with transaction.atomic():
+            profile = _extract_profile(answers)
+            respondent = Respondent.objects.create(**profile)
+            questions = {
+                question.slug: question
+                for question in Question.objects.prefetch_related("options").all()
+            }
 
-    for slug, value in answers.items():
-        question = questions.get(slug)
-        if not question:
-            continue
-        Response.objects.create(
-            respondent=respondent,
-            question=question,
-            question_slug=slug,
-            question_prompt=question.prompt,
-            answer_text=_answer_text(value),
-            answer_number=_coerce_number(value),
-            answer_json=value if isinstance(value, (dict, list)) else None,
+            response_rows = []
+            for slug, value in answers.items():
+                question = questions.get(slug)
+                if not question:
+                    continue
+                response_rows.append(
+                    Response(
+                        respondent=respondent,
+                        question=question,
+                        question_slug=slug,
+                        question_prompt=question.prompt,
+                        answer_text=_answer_text(value),
+                        answer_number=_coerce_number(value),
+                        answer_json=value if isinstance(value, (dict, list)) else None,
+                    )
+                )
+            Response.objects.bulk_create(response_rows)
+
+            StockPreference.objects.bulk_create(
+                [
+                    StockPreference(respondent=respondent, name=name)
+                    for name in _stock_names(answers.get("stock_preferences"))
+                ]
+            )
+
+            score = calculate_behaviour(answers, questions.values())
+            BehaviourScore.objects.create(respondent=respondent, **score)
+
+        respondent = (
+            Respondent.objects.prefetch_related("stock_preferences")
+            .select_related("behaviour_score")
+            .get(id=respondent.id)
+        )
+    except Exception:
+        logger.exception(
+            "Survey submission failed while writing respondent response.",
+            extra={"answer_slugs": sorted(answers.keys())},
+        )
+        return ApiResponse(
+            {"detail": "Submission failed before the response could be saved."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    for name in _stock_names(answers.get("stock_preferences")):
-        StockPreference.objects.create(respondent=respondent, name=name)
-
-    score = calculate_behaviour(answers, questions.values())
-    BehaviourScore.objects.create(respondent=respondent, **score)
-
-    respondent = (
-        Respondent.objects.prefetch_related("stock_preferences")
-        .select_related("behaviour_score")
-        .get(id=respondent.id)
-    )
     return ApiResponse(
         {
             "respondent": RespondentSerializer(respondent).data,
@@ -198,9 +299,32 @@ def _count_answers(slug: str, respondent_ids: list[int] | None = None):
     return [{"name": key or "Not specified", "value": value} for key, value in counts.items()]
 
 
+def _location_reference():
+    rows = list(
+        GeographicLocation.objects.order_by("district", "taluka")
+        .values_list("district", "taluka")
+        .distinct()
+    )
+    if not rows:
+        return list(DISTRICTS), taluka_options_metadata(), dict(TALUKA_DISTRICT)
+
+    districts: list[str] = []
+    talukas_by_district: dict[str, list[str]] = {}
+    taluka_district: dict[str, str] = {}
+    for district, taluka in rows:
+        if district not in districts:
+            districts.append(district)
+        talukas_by_district.setdefault(district, [])
+        if taluka not in talukas_by_district[district]:
+            talukas_by_district[district].append(taluka)
+        taluka_district[taluka] = district
+    return districts, talukas_by_district, taluka_district
+
+
 def _geographic_payload(respondents, total: int, district_filter: str = ""):
+    districts, talukas_by_district, taluka_district = _location_reference()
     district_counts = []
-    for district in DISTRICTS:
+    for district in districts:
         value = respondents.filter(district=district).count()
         district_counts.append(
             {
@@ -211,9 +335,9 @@ def _geographic_payload(respondents, total: int, district_filter: str = ""):
         )
 
     possible_talukas = (
-        TALUKAS_BY_DISTRICT[district_filter]
+        talukas_by_district[district_filter]
         if district_filter
-        else ALL_TALUKAS
+        else [taluka for talukas in talukas_by_district.values() for taluka in talukas]
     )
     taluka_counts = Counter(
         respondent.taluka
@@ -223,7 +347,7 @@ def _geographic_payload(respondents, total: int, district_filter: str = ""):
     taluka_distribution = [
         {
             "name": taluka,
-            "district": TALUKA_DISTRICT[taluka],
+            "district": taluka_district[taluka],
             "value": taluka_counts.get(taluka, 0),
             "percentage": (
                 round((taluka_counts.get(taluka, 0) / total) * 100, 1)
@@ -248,10 +372,12 @@ def _geographic_payload(respondents, total: int, district_filter: str = ""):
         "summary": {
             "totalResponses": total,
             "kolhapurResponses": next(
-                item["value"] for item in district_counts if item["name"] == "Kolhapur"
+                (item["value"] for item in district_counts if item["name"] == "Kolhapur"),
+                0,
             ),
             "sangliResponses": next(
-                item["value"] for item in district_counts if item["name"] == "Sangli"
+                (item["value"] for item in district_counts if item["name"] == "Sangli"),
+                0,
             ),
             "mostRepresentedTaluka": (
                 taluka_distribution[0]["name"] if taluka_distribution else "No data yet"
@@ -265,8 +391,8 @@ def _geographic_payload(respondents, total: int, district_filter: str = ""):
         "districtDistribution": district_counts,
         "talukaDistribution": taluka_distribution,
         "options": {
-            "districts": DISTRICTS,
-            "talukasByDistrict": TALUKAS_BY_DISTRICT,
+            "districts": districts,
+            "talukasByDistrict": talukas_by_district,
         },
     }
 
@@ -370,6 +496,7 @@ def _export_rows(district: str = "", taluka: str = ""):
         "Education",
         "District",
         "Taluka",
+        "Village",
         "District/City (Legacy)",
         "Stock Preferences",
         "Behaviour Score",
@@ -392,6 +519,7 @@ def _export_rows(district: str = "", taluka: str = ""):
                 respondent.education,
                 respondent.district,
                 respondent.taluka,
+                respondent.village,
                 respondent.district_city,
                 ", ".join(stock.name for stock in respondent.stock_preferences.all()),
                 getattr(score, "score", ""),

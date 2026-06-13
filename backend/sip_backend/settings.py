@@ -94,6 +94,9 @@ WSGI_APPLICATION = 'sip_backend.wsgi.application'
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+if not DEBUG and not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be set when DEBUG=False.")
+
 if DATABASE_URL and dj_database_url:
     DATABASES = {
         "default": dj_database_url.parse(
@@ -164,7 +167,9 @@ CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     [
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "http://localhost:3000",
+        "http://localhost:3001",
         "https://sip-behaviour-analytics.vercel.app",
         "https://sip-behaviour-analytics-elcylalko-priyanka-research.vercel.app",
     ],

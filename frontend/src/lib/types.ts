@@ -43,6 +43,12 @@ export type BehaviourResult = {
   summary: string;
 };
 
+export type GeographyOptions = {
+  districts: string[];
+  talukasByDistrict: Record<string, string[]>;
+  villagesByDistrictTaluka: Record<string, Record<string, string[]>>;
+};
+
 export type GeographicDataPoint = {
   name: string;
   value: number;

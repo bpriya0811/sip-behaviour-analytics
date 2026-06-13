@@ -5,9 +5,14 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Loader2, Plus, Send, X } from "lucide-react";
 
-import { fetchQuestions, submitSurvey } from "@/lib/api";
-import { talukasForDistrict } from "@/lib/geography";
-import type { BehaviourResult, Question, QuestionOption, SurveyAnswers } from "@/lib/types";
+import { fetchGeographyOptions, fetchQuestions, submitSurvey } from "@/lib/api";
+import type {
+  BehaviourResult,
+  GeographyOptions,
+  Question,
+  QuestionOption,
+  SurveyAnswers
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,11 +57,20 @@ function dependencySlug(question: Question) {
   return question.slug === "taluka" ? "district" : "";
 }
 
+function districtDependencySlug(question: Question) {
+  const configured = question.metadata?.dependsOnDistrict;
+  return typeof configured === "string" ? configured : "";
+}
+
 function optionFromLabel(label: string): QuestionOption {
   return { label, value: label };
 }
 
-function dependentOptions(question: Question, answers: SurveyAnswers) {
+function dependentOptions(
+  question: Question,
+  answers: SurveyAnswers,
+  geography: GeographyOptions | null
+) {
   const dependsOn = dependencySlug(question);
   if (!dependsOn) return question.options;
 
@@ -72,11 +86,21 @@ function dependentOptions(question: Question, answers: SurveyAnswers) {
     }
   }
 
-  if (question.slug === "taluka") {
-    return talukasForDistrict(parent).map(optionFromLabel);
+  if (question.slug === "taluka" && geography) {
+    return (geography.talukasByDistrict[parent] ?? []).map(optionFromLabel);
   }
 
   return question.options;
+}
+
+function villageOptions(question: Question, answers: SurveyAnswers, geography: GeographyOptions | null) {
+  if (!geography) return [];
+  const districtValue = answers[districtDependencySlug(question) || "district"];
+  const talukaValue = answers[dependencySlug(question)];
+  const district = typeof districtValue === "string" ? districtValue : "";
+  const taluka = typeof talukaValue === "string" ? talukaValue : "";
+  if (!district || !taluka) return [];
+  return geography.villagesByDistrictTaluka[district]?.[taluka] ?? [];
 }
 
 function ProgressDots({ step, total }: { step: number; total: number }) {
@@ -172,21 +196,155 @@ function StockTagInput({
   );
 }
 
+function SearchableVillageInput({
+  value,
+  options,
+  disabled,
+  placeholder,
+  onChange
+}: {
+  value: string;
+  options: string[];
+  disabled: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const [query, setQuery] = useState(value);
+
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  const filtered = options
+    .filter((item) => item.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 10);
+
+  return (
+    <div className="space-y-3">
+      <Input
+        value={query}
+        disabled={disabled}
+        placeholder={disabled ? "Select taluka first" : placeholder}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onChange(event.target.value);
+        }}
+      />
+      {!disabled && filtered.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {filtered.map((village) => (
+            <button
+              type="button"
+              key={village}
+              onClick={() => {
+                setQuery(village);
+                onChange(village);
+              }}
+              className="rounded-md border border-[#dfe6ff] bg-white px-3 py-2 text-left text-sm font-medium text-[#4058ff] transition hover:bg-[#eef3ff]"
+            >
+              {village}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchableDropdown({
+  value,
+  options,
+  disabled,
+  placeholder,
+  onChange,
+  disabledPlaceholder
+}: {
+  value: string;
+  options: Array<{ label: string; value: string }>;
+  disabled: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+  disabledPlaceholder?: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  const filtered = options
+    .filter((item) => item.label.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 15);
+
+  const handleSelect = (selected: string) => {
+    setQuery(selected);
+    onChange(selected);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <Input
+        value={query}
+        disabled={disabled}
+        placeholder={disabled ? (disabledPlaceholder || placeholder) : placeholder}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => !disabled && setIsOpen(true)}
+      />
+      {!disabled && isOpen && filtered.length > 0 && (
+        <div className="rounded-md border border-[#dfe6ff] bg-white shadow-md">
+          {filtered.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              onClick={() => handleSelect(option.label)}
+              className="w-full px-3 py-2 text-left text-sm font-medium text-[#4058ff] transition hover:bg-[#eef3ff]"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuestionField({
   question,
   value,
   onChange,
-  answers
+  answers,
+  geography
 }: {
   question: Question;
   value: string | number | string[];
   onChange: (value: string | number | string[]) => void;
   answers: SurveyAnswers;
+  geography: GeographyOptions | null;
 }) {
   if (question.metadata?.smartStockInput) {
     return (
       <StockTagInput
         value={Array.isArray(value) ? value : []}
+        placeholder={question.placeholder}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (question.slug === "village" || question.metadata?.autocomplete) {
+    const options = villageOptions(question, answers, geography);
+    const parentValue = answers[dependencySlug(question)];
+    const disabled = !parentValue;
+    return (
+      <SearchableVillageInput
+        value={typeof value === "string" ? value : ""}
+        options={options}
+        disabled={disabled}
         placeholder={question.placeholder}
         onChange={onChange}
       />
@@ -213,9 +371,24 @@ function QuestionField({
   if (question.question_type === "dropdown") {
     const dependsOn = dependencySlug(question);
     const parentValue = dependsOn ? answers[dependsOn] : "";
-    const options = dependentOptions(question, answers);
+    const options = dependentOptions(question, answers, geography);
     const disabled = Boolean(dependsOn && !parentValue);
 
+    // Use searchable dropdown for geographic fields (district, taluka, village)
+    if (question.slug === "district" || question.slug === "taluka") {
+      return (
+        <SearchableDropdown
+          value={typeof value === "string" ? value : ""}
+          options={options}
+          disabled={disabled}
+          placeholder={question.placeholder || "Type to search..."}
+          disabledPlaceholder={String(question.metadata?.dependentPlaceholder ?? "Select district first")}
+          onChange={onChange}
+        />
+      );
+    }
+
+    // Use regular select for other dropdowns
     return (
       <select
         value={typeof value === "string" ? value : ""}
@@ -365,6 +538,7 @@ function ResultView({ result }: { result: BehaviourResult }) {
 
 export default function SurveyPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [geography, setGeography] = useState<GeographyOptions | null>(null);
   const [answers, setAnswers] = useState<SurveyAnswers>({});
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -373,8 +547,9 @@ export default function SurveyPage() {
   const [result, setResult] = useState<BehaviourResult | null>(null);
 
   useEffect(() => {
-    fetchQuestions()
-      .then((items) => {
+    Promise.all([fetchQuestions(), fetchGeographyOptions()])
+      .then(([items, geographyOptions]) => {
+        setGeography(geographyOptions);
         setQuestions(items);
         setAnswers((current) => {
           const next = { ...current };
@@ -402,17 +577,36 @@ export default function SurveyPage() {
     if (!question.required) return true;
     const value = answers[question.slug];
     if (Array.isArray(value)) return value.length > 0;
+    if ((question.slug === "village" || question.metadata?.autocomplete) && geography) {
+      const options = villageOptions(question, answers, geography);
+      return typeof value === "string" && options.includes(value);
+    }
     return value !== "" && value !== undefined && value !== null;
   });
 
   const handleAnswerChange = (question: Question, value: string | number | string[]) => {
     setAnswers((current) => {
       const next = { ...current, [question.slug]: value };
-      questions.forEach((candidate) => {
-        if (dependencySlug(candidate) === question.slug) {
-          next[candidate.slug] = getDefaultAnswer(candidate);
+
+      const resetDependents = (slug: string) => {
+        questions.forEach((candidate) => {
+          if (dependencySlug(candidate) === slug || districtDependencySlug(candidate) === slug) {
+            next[candidate.slug] = getDefaultAnswer(candidate);
+            resetDependents(candidate.slug);
+          }
+        });
+      };
+
+      resetDependents(question.slug);
+
+      if (question.slug === "taluka") {
+        const district = typeof current.district === "string" ? current.district : "";
+        const talukas = geography?.talukasByDistrict[district] ?? [];
+        if (typeof value === "string" && !talukas.includes(value)) {
+          next[question.slug] = "";
         }
-      });
+      }
+
       return next;
     });
   };
@@ -499,6 +693,7 @@ export default function SurveyPage() {
                         question={question}
                         value={answers[question.slug] ?? getDefaultAnswer(question)}
                         answers={answers}
+                        geography={geography}
                         onChange={(value) => handleAnswerChange(question, value)}
                       />
                     </div>

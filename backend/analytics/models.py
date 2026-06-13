@@ -68,10 +68,34 @@ class Respondent(models.Model):
     education = models.CharField(max_length=120, blank=True)
     district = models.CharField(max_length=120, blank=True, db_index=True)
     taluka = models.CharField(max_length=120, blank=True, db_index=True)
+    village = models.CharField(max_length=180, blank=True, db_index=True)
     district_city = models.CharField(max_length=120, blank=True)
 
     def __str__(self) -> str:
         return f"Respondent {self.id}"
+
+
+class GeographicLocation(models.Model):
+    district = models.CharField(max_length=120, db_index=True)
+    taluka = models.CharField(max_length=120, db_index=True)
+    village = models.CharField(max_length=180, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["district", "taluka", "village"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["district", "taluka", "village"],
+                name="unique_geographic_location",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["district", "taluka"]),
+            models.Index(fields=["district", "taluka", "village"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.district} / {self.taluka} / {self.village}"
 
 
 class Response(models.Model):

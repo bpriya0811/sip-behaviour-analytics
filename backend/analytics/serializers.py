@@ -86,6 +86,7 @@ class RespondentSerializer(serializers.ModelSerializer):
             "education",
             "district",
             "taluka",
+            "village",
             "district_city",
             "behaviour_score",
             "stocks",
